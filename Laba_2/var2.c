@@ -74,6 +74,12 @@ int findFile(char *directory) {
 			if (!strcmp(dirInfo->d_name, file)) { // file found
 			
 				char *FullNameOfFile = realpath(directory,  NULL); 
+				if (FullNameOfFile == NULL) {
+					fprintf(stderr, "%s : %s\n",FullNameOfFile,strerror(errno));
+					free (FullNameOfFile);
+					result = -1;
+					goto release_resources;
+				}	
 				printf("\nWay to the file: %s\n", FullNameOfFile);
 				free (FullNameOfFile);
 				
