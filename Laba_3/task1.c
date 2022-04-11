@@ -26,12 +26,8 @@ int main() {
         
         puts("Время CHILD №1 : \n");
         GetTime();
-        
-        sleep(6);
-        
-        printf("CHILD №1: Введите мой код возврата:");
-        scanf(" %d",&res1);
-        printf("CHILD №1: Выход!\n\n");
+       
+	res1 = 0;
         
         exit(res1);
         
@@ -49,12 +45,7 @@ int main() {
 		puts("Время CHILD №2 : \n");
 		GetTime();
 		
-		sleep(3);
-		
-		printf("CHILD №2: Введите мой код возврата:");
-		scanf(" %d",&res2);
-		printf("CHILD №2: Выход!\n\n");
-
+		res2 = 0;
 		exit(res2);
 		
 	    } else if (pid2 == -1) {
