@@ -175,8 +175,9 @@ int Synchronization(char *dirPathSrc, char *dirPathDst, int numStreams)
 				close(file_o);
 				printf("PID of stream: %d File name: %s File size: %ld bytes\n", getpid(), dirInfoSrc->d_name, buf.st_size);
 
-				++numOpenStreams;
 				exit(EXIT_SUCCESS);
+			default:
+				++numOpenStreams;	
 			}
 		}
 	}
