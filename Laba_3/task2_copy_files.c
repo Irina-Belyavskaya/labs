@@ -148,36 +148,36 @@ int Synchronization(char *dirPathSrc, char *dirPathDst, int numStreams)
 			int child = fork();
 			switch (child)
 			{
-			case -1:
-				perror("Error in fork");
-				continue;
-			case 0:
-				strcpy(SrcPath, dirPathSrc);
-				strcat(SrcPath, "/");
-				strcat(SrcPath, dirInfoSrc->d_name);
+				case -1:
+					perror("Error in fork");
+					continue;
+				case 0:
+					strcpy(SrcPath, dirPathSrc);
+					strcat(SrcPath, "/");
+					strcat(SrcPath, dirInfoSrc->d_name);
 
-				strcpy(DestPath, dirPathDst);
-				strcat(DestPath, "/");
-				strcat(DestPath, dirInfoSrc->d_name);
+					strcpy(DestPath, dirPathDst);
+					strcat(DestPath, "/");
+					strcat(DestPath, dirInfoSrc->d_name);
 
-				if (CopyFile(SrcPath, DestPath) != 0)
-				{
-					puts("Error of function copy.");
-					return -1;
-				}
+					if (CopyFile(SrcPath, DestPath) != 0)
+					{
+						puts("Error of function copy.");
+						return -1;
+					}
 
-				int file_o = open(SrcPath, O_RDONLY);
-				if (fstat(file_o, &buf))
-				{
-					fputs("Unable to fill stat structure\n", stderr);
-					return -1;
-				}
-				close(file_o);
-				printf("PID of stream: %d File name: %s File size: %ld bytes\n", getpid(), dirInfoSrc->d_name, buf.st_size);
+					int file_o = open(SrcPath, O_RDONLY);
+					if (fstat(file_o, &buf))
+					{
+						fputs("Unable to fill stat structure\n", stderr);
+						return -1;
+					}
+					close(file_o);
+					printf("PID of stream: %d File name: %s File size: %ld bytes\n", getpid(), dirInfoSrc->d_name, buf.st_size);
 
-				exit(EXIT_SUCCESS);
-			default:
-				++numOpenStreams;	
+					exit(EXIT_SUCCESS);
+				default:
+					++numOpenStreams;	
 			}
 		}
 	}
@@ -187,6 +187,7 @@ int Synchronization(char *dirPathSrc, char *dirPathDst, int numStreams)
 
 int main(int argc, char *argv[])
 {
+	printf("Hello! I am PARENT, my pid is: %d\n", getpid());
 	if (argc != 3)
 	{
 		puts("Not enougth parameters:\nFirst parameter - directory from which the files will be copied\nSecond parameter - directory where the files will be copied to");
