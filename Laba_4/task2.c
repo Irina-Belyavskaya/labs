@@ -8,9 +8,11 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <semaphore.h>
+#include <fcntl.h>
+#include <pthread.h>
 
-#define TREE_LENGTH 8
 #define TOTAL_SIGNALS 101
+#define NUM_THREADS 8
 
 int daytime [4];
 int getSig1;
@@ -20,11 +22,17 @@ int numSigUSR2;
 pid_t node0 = 0,node1 = 0,node2 = 0,node3 = 0,node4 = 0,node5 = 0,node6 = 0,node7 = 0,node8 = 0;
 pid_t pidgroup1 = 0,pidgroup2 = 0;
 
-sem_t mutex;
+char *sem_name1 = "SemGroup1";
+char *sem_name2 = "SemGroup2";
+
+sem_t *mutex1;
+sem_t *mutex2;
 FILE *f;
 
 struct sigaction sa;
 struct sigaction saterm;
+
+pthread_barrier_t barrier; 
 
 void Node1Handler(int);
 void Node2Handler(int);
@@ -52,13 +60,36 @@ void MutexGroup2(pid_t);
 
 void main () 
 {
-    if (sem_init(&mutex, 0, 1) != 0)
-        printf("Can`t init MUTEX.\n");
+    sem_unlink (sem_name1);
+    sem_unlink (sem_name2);
+    mutex1 = sem_open(sem_name1,O_CREAT,0777,1);
+    if ( mutex1 == NULL)
+    {
+        printf("Can`t open MUTEX 1.\n");
+    }
+    mutex2 = sem_open(sem_name2,O_CREAT,0777,1);
+    if ( mutex2 == NULL)
+    {
+        printf("Can`t open MUTEX 2.\n");
+    }
+    
+    // pthread_barrierattr_t attr;
+    // int ret; 
+    // ret = pthread_barrierattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    // if (ret !=  0)
+    // {
+    //     printf("Cannot set attribute barrier\n");
+    // }
+    // ret = pthread_barrier_init(&barrier, &attr, NUM_THREADS + 1);
+    // if (ret !=  0)
+    // {
+    //     printf("Cannot init barrier\n");
+    // }
     BuildTree ();
     sleep(1);
     SetSignals();
-    if (sem_destroy(&mutex) != 0)
-        printf("Can`t destroy MUTEX.\n");
+    sem_unlink (sem_name1);
+    sem_unlink (sem_name2);
     exit(0);
 }
 
@@ -164,6 +195,8 @@ void BuildTree ()
 
 void DownloadFromFile1()
 {
+    if (sem_wait(mutex1) != 0)
+        perror("sem_wait 1");
     FILE *file = fopen("group1.txt", "r");
     if (file != NULL)
     {
@@ -173,10 +206,14 @@ void DownloadFromFile1()
     } else 
         perror("file group1");
     fclose(file);
+    if (sem_post(mutex1) != 0)
+        perror("sem_post 1");
 }
 
 void DownloadFromFile2()
 {
+    if (sem_wait(mutex2) != 0)
+        perror("sem_wait 2");
     FILE *file = fopen("group2.txt", "r");
     if (file != NULL)
     {
@@ -186,11 +223,13 @@ void DownloadFromFile2()
     } else 
         perror("file group2");
     fclose(file);
+    if (sem_post(mutex2) != 0)
+        perror("sem_post 2");
 }
 
 void MutexGroup1(pid_t node) 
 {
-    if (sem_wait(&mutex) != 0)
+    if (sem_wait(mutex1) != 0)
         perror("sem_wait 1");
     f = fopen("group1.txt", "r");
     if (f == NULL)
@@ -206,7 +245,6 @@ void MutexGroup1(pid_t node)
                 exit(-1);
             }
             pidgroup1 = node;
-            //printf("start pidgroup1 = %d\n", pidgroup1);
             fprintf(f, "%d", pidgroup1);
         }
     } else {
@@ -221,13 +259,13 @@ void MutexGroup1(pid_t node)
     }
     fclose(f);
     printf("pidgroup1 = %d group pid = %d process pid = %d\n",pidgroup1, getpgid(node), getpid());
-    if (sem_post(&mutex) != 0)
+    if (sem_post(mutex1) != 0)
         perror("sem_post 1");
 }
 
 void MutexGroup2(pid_t node) 
 {
-    if (sem_wait(&mutex) != 0 )
+    if (sem_wait(mutex2) != 0 )
         perror("sem_wait 2");
     f = fopen("group2.txt", "r");
     if (f == NULL)
@@ -248,8 +286,6 @@ void MutexGroup2(pid_t node)
     } else {
         pid_t pid;
         fscanf(f, "%d", &pid);
-        //printf("%d\n",pid);
-        //if (pidgroup2 == 0)
             pidgroup2 = pid;
         if (setpgid(node,pidgroup2) == -1)
         {
@@ -259,8 +295,13 @@ void MutexGroup2(pid_t node)
     }
     fclose(f);
     printf("pidgroup2 = %d group pid = %d process pid = %d\n",pidgroup2, getpgid(node), getpid());
-    if (sem_post(&mutex) != 0)
+    if (sem_post(mutex2) != 0)
         perror("sem_post 2");
+}
+
+void Hadler (int sig)
+{
+    printf ("node = %d SIGNAL = %d\n",getpid(),sig);
 }
 
 void SetSignals()
@@ -268,10 +309,28 @@ void SetSignals()
     struct sigaction sa;
     struct sigaction saterm;
 
+    sigset_t set, mask;
+    sigfillset(&mask);
+    if (sigprocmask(SIG_SETMASK, &mask, NULL) == -1)
+    {
+        perror("sigprocmask 0");
+    }
+    sigaddset(&set,SIGTERM);
+
     if (getpid() == node1) 
     {
-        //printf("Node 1 here\n");
-        
+        sigaddset(&set,SIGUSR2);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 1");
+        }
+        sa.sa_mask = set;
+
+        // sa.sa_handler = Node1Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
+        // }
+
         sa.sa_handler = Node1Handler;
         if (sigaction(SIGUSR2, &sa, NULL) == -1) 
         {
@@ -279,14 +338,14 @@ void SetSignals()
             exit(-1);
         }
 
-        sleep(1);
+        
+        sleep(10);
         DownloadFromFile1();
-        //printf("kill pidgroup1 = %d\n", pidgroup1);
+
         if (kill(-pidgroup1, SIGUSR1) == -1)
             perror("KILL GROUP1");
         else
         {
-            //printf("Sent to %d\n",pidgroup1);
             ShowInfo("sent", 1, 1);
             numSigUSR1++;
         }
@@ -294,10 +353,15 @@ void SetSignals()
 
     if (getpid() == node2) 
     {
-        //printf("Node 2 here\n");
-
         MutexGroup1(node2);
 
+        sigaddset(&set,SIGUSR1);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 2");
+        }
+        sa.sa_mask = set;
+        
         sa.sa_handler = Node2Handler;
         if (sigaction(SIGUSR1, &sa, NULL) == -1)
         {
@@ -312,20 +376,22 @@ void SetSignals()
             exit(-1);
         }
 
-        // if (kill(-pidgroup2, SIGUSR2) == -1)
-        //     perror("KILL GROUP2");
-        // else
-        // {
-        //     ShowInfo("sent", 2, 2);
-        //     numSigUSR2++;
+        // sa.sa_handler = Node2Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
         // }
     }
 
     if (getpid() == node3) 
     {
-        //printf("Node 3 here\n");
-
         MutexGroup1(node3);
+
+        sigaddset(&set,SIGUSR1);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 3");
+        }
+        sa.sa_mask = set;
 
         sa.sa_handler = Node3Handler;
         if (sigaction(SIGUSR1, &sa, NULL) == -1)
@@ -340,13 +406,23 @@ void SetSignals()
             perror("sigaction");
             exit(-1);
         }
+
+        // sa.sa_handler = Node3Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
+        // }
     }
 
     if (getpid() == node4) 
     {
-        //printf("Node 4 here\n");
-
         MutexGroup1(node4);
+
+        sigaddset(&set,SIGUSR1);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 4");
+        }
+        sa.sa_mask = set;
 
         sa.sa_handler = Node4Handler;
         if (sigaction(SIGUSR1, &sa, NULL) == -1)
@@ -362,13 +438,23 @@ void SetSignals()
             exit(-1);
         }
 
+        // sa.sa_handler = Node4Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
+        // }
+
     }
 
     if (getpid() == node5) 
     {
-       // printf("Node 5 here\n");
-
         MutexGroup2(node5);
+
+        sigaddset(&set,SIGUSR2);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 5");
+        }
+        sa.sa_mask = set;
 
         sa.sa_handler = Node5Handler;
         if (sigaction(SIGUSR2, &sa, NULL) == -1)
@@ -383,13 +469,23 @@ void SetSignals()
             perror("sigaction");
             exit(-1);
         }
+
+        // sa.sa_handler = Node5Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
+        // }
     }
 
     if (getpid() == node6) 
     {
-        //printf("Node 6 here\n");
-
         MutexGroup2(node6);
+
+        sigaddset(&set,SIGUSR2);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 6");
+        }
+        sa.sa_mask = set;
 
         sa.sa_handler = Node6Handler;
         if (sigaction(SIGUSR2, &sa, NULL) == -1)
@@ -405,18 +501,20 @@ void SetSignals()
             exit(-1);
         }
 
-        // if (kill(node7, SIGUSR1) == -1)
-        //     perror("kill");
-        // else 
-        // {
-        //     ShowInfo("sent", 1, 6);
-        //     numSigUSR1++;
+        // sa.sa_handler = Node6Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
         // }
     }
 
     if (getpid() == node7) 
     {
-        //printf("Node 7 here\n");
+        sigaddset(&set,SIGUSR1);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 7");
+        }
+        sa.sa_mask = set;
 
         sa.sa_handler = Node7Handler;
         if (sigaction(SIGUSR1, &sa, NULL) == -1)
@@ -432,18 +530,20 @@ void SetSignals()
             exit(-1);
         }
 
-        // if (kill(node8, SIGUSR1) == -1)
-        //     perror("kill");
-        // else 
-        // {
-        //     ShowInfo("sent", 1, 7);
-        //     numSigUSR1++;
+        // sa.sa_handler = Node7Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
         // }
     }
 
     if (getpid() == node8) 
     {
-        //printf("Node 8 here\n");
+        sigaddset(&set,SIGUSR1);
+        if (sigprocmask(SIG_UNBLOCK,&set,&mask) == -1)
+        {
+            perror("sigprocmask 8");
+        }
+        sa.sa_mask = set;
 
         sa.sa_handler = Node8Handler;
         if (sigaction(SIGUSR1, &sa, NULL) == -1)
@@ -459,19 +559,43 @@ void SetSignals()
             exit(-1);
         }
 
-        // if (kill(node1, SIGUSR2) == -1)
-        //     perror("kill");
-        // else
-        // {
-        //     ShowInfo("sent", 2, 8);
-        //     numSigUSR2++;
+        // sa.sa_handler = Node8Handler;
+        // for (int sig = 1; sig <= SIGRTMAX; ++sig) {
+        //     sigaction(sig, &sa, NULL);
         // }
     }
+    
+    // if (pthread_barrier_wait(&barrier) == PTHREAD_BARRIER_SERIAL_THREAD)
+    // {
+    //     pthread_barrier_destroy(&barrier);
+    // } else 
+    // {
+    //     printf("error wait barrier in thread\n");
+    // }
+
+    //sleep(3);
+
+    // if (getpid() == node1)
+    // {
+    //     printf("go\n");
+    //     DownloadFromFile1();
+
+    //     if (kill(-pidgroup1, SIGUSR1) == -1)
+    //         perror("KILL GROUP1");
+    //     else
+    //     {
+    //         ShowInfo("sent", 1, 1);
+    //         numSigUSR1++;
+    //     }
+    // } //else 
+    // //printf("Node = %d\n", getpid());
 
     if (getpid() != node0)
     {
         while (1);
     }
+    else 
+        wait(NULL);
         
 }
 
@@ -492,13 +616,13 @@ void getTime()
 void ShowInfo(char *action, int signal, int numNode) 
 {
     getTime();
-    printf("№%d PID: %d Parent: %d %s SIGUSR%d Time: %02d:%02d:%02d:%03d\n",numNode,getpid(),getppid(),action,signal,daytime[0],daytime[1],daytime[2],daytime[3]);
+    printf("№%d PID: %d Parent: %d %s SIGUSR%d Time: %02d:%02d:%02d:%03d GROUP:%d\n",numNode,getpid(),getppid(),action,signal,daytime[0],daytime[1],daytime[2],daytime[3],getpgid(getpid()));
 }
 
 void Node1Handler(int sig)
 {
     ++getSig1;
-    ShowInfo ("got", 2, 1);
+    ShowInfo ("got", sig, 1);
 
     if (getSig1 == TOTAL_SIGNALS)
     {
@@ -525,8 +649,7 @@ void Node1Handler(int sig)
             perror("KILL group1 handler1");
         } else 
         {
-            //printf("Sent to %d\n",pidgroup1);
-            ShowInfo ("sent", 1, 1);
+            ShowInfo ("sent", sig, 1);
             ++numSigUSR1;
         }
     }
@@ -536,7 +659,7 @@ void Node2Handler(int sig)
 {
     ShowInfo ("got", 1, 2);
     DownloadFromFile2();
-    //printf("kill pidgroup2 = %d\n", pidgroup2);
+
     if (kill(-pidgroup2, SIGUSR2) == -1)
     {
         perror("KILL group2 handler2");
@@ -565,7 +688,7 @@ void Node5Handler(int sig)
 void Node6Handler(int sig)
 {
     ShowInfo ("got", 2, 6);
-   // printf("Node 6 = %d (%d)\n",getpid(),node6);
+
     if (kill(node7, SIGUSR1) == -1)
     {
         perror("KILL handler6");
@@ -579,7 +702,7 @@ void Node6Handler(int sig)
 void Node7Handler(int sig)
 {
     ShowInfo ("got", 1, 7);
-    //printf("Node 7 = %d (%d)\n",getpid(),node7);
+
     if (kill(node8, SIGUSR1) == -1)
     {
         perror("KILL handler7");
@@ -593,7 +716,7 @@ void Node7Handler(int sig)
 void Node8Handler(int sig)
 {
     ShowInfo ("got", 1, 8);
-    //printf("node 1 = %d node 8 = %d\n",node1,getpid());
+
     if (kill(node1, SIGUSR2) == -1)
     {
         perror("KILL handler8");
